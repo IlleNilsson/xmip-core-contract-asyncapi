@@ -22,7 +22,7 @@
 
 use contract::{
     Contract, ContractDescriptor, ContractError, ContractFactory, ContractId, ValidationIssue,
-    ValidationResult,
+    ValidationResult, reference,
 };
 use serde_json::Value;
 use stream::Stream;
@@ -77,15 +77,13 @@ fn descriptor(id: &str) -> ContractDescriptor {
 fn soundness(document: &Value) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     let Some(object) = document.as_object() else {
-        return vec![issue(
-            "malformed",
+        return vec![ValidationIssue::malformed(
             "the document is not a JSON object",
-            None,
         )];
     };
     let version = object.get("asyncapi").and_then(Value::as_str).unwrap_or("");
     if !(version.starts_with("2.") || version.starts_with("3.")) {
-        issues.push(issue(
+        issues.push(ValidationIssue::new(
             "structure",
             "neither asyncapi 2.x nor 3.x is declared",
             Some("asyncapi".into()),
@@ -98,7 +96,7 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
             .and_then(Value::as_str)
             .is_none()
         {
-            issues.push(issue(
+            issues.push(ValidationIssue::new(
                 "structure",
                 &format!("info.{field} is missing"),
                 Some("info".into()),
@@ -108,12 +106,12 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
     match object.get("channels") {
         Some(Value::Object(_)) | None if version.starts_with("3.") => {}
         Some(Value::Object(_)) => {}
-        Some(_) => issues.push(issue(
+        Some(_) => issues.push(ValidationIssue::new(
             "structure",
             "channels is not an object",
             Some("channels".into()),
         )),
-        None => issues.push(issue(
+        None => issues.push(ValidationIssue::new(
             "structure",
             "channels is missing",
             Some("channels".into()),
@@ -131,7 +129,7 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
                         .and_then(Value::as_str)
                         .is_none()
                     {
-                        issues.push(issue(
+                        issues.push(ValidationIssue::new(
                             "structure",
                             "an operation without a channel $ref",
                             Some(format!("operations.{name}")),
@@ -139,42 +137,15 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
                     }
                 }
             }
-            None => issues.push(issue(
+            None => issues.push(ValidationIssue::new(
                 "structure",
                 "operations is not an object",
                 Some("operations".into()),
             )),
         }
     }
-    references(document, document, "", &mut issues);
+    issues.extend(reference::dangling(document));
     issues
-}
-
-/// Every `$ref` under `value` that begins with `#` and does not land.
-fn references(root: &Value, value: &Value, path: &str, issues: &mut Vec<ValidationIssue>) {
-    match value {
-        Value::Object(object) => {
-            if let Some(Value::String(target)) = object.get("$ref")
-                && let Some(pointer) = target.strip_prefix('#')
-                && root.pointer(pointer).is_none()
-            {
-                issues.push(issue(
-                    "reference",
-                    &format!("$ref {target} does not land"),
-                    Some(path.trim_start_matches('.').to_string()),
-                ));
-            }
-            for (key, child) in object {
-                references(root, child, &format!("{path}.{key}"), issues);
-            }
-        }
-        Value::Array(items) => {
-            for (i, child) in items.iter().enumerate() {
-                references(root, child, &format!("{path}[{i}]"), issues);
-            }
-        }
-        _ => {}
-    }
 }
 
 /// Whether `document` defines `channel`, by key or by 3.x address.
@@ -213,10 +184,8 @@ impl Contract for AsyncApi {
         let document: Value = match serde_json::from_slice(stream.bytes()) {
             Ok(document) => document,
             Err(error) => {
-                return Ok(result(vec![issue(
-                    "malformed",
+                return Ok(ValidationResult::of(vec![ValidationIssue::malformed(
                     &format!("not JSON: {error}"),
-                    None,
                 )]));
             }
         };
@@ -224,28 +193,13 @@ impl Contract for AsyncApi {
         if let Some(channel) = &self.channel
             && !defines(&document, channel)
         {
-            issues.push(issue(
+            issues.push(ValidationIssue::new(
                 "channel",
                 &format!("does not define channel {channel}"),
                 Some("channels".into()),
             ));
         }
-        Ok(result(issues))
-    }
-}
-
-fn issue(code: &str, message: &str, path: Option<String>) -> ValidationIssue {
-    ValidationIssue {
-        code: code.to_string(),
-        message: message.to_string(),
-        path,
-    }
-}
-
-fn result(issues: Vec<ValidationIssue>) -> ValidationResult {
-    ValidationResult {
-        valid: issues.is_empty(),
-        issues,
+        Ok(ValidationResult::of(issues))
     }
 }
 
@@ -270,7 +224,7 @@ impl ContractFactory for AsyncApiFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xcore::StreamId;
+    use contract::fixture::stream_as as stream;
 
     const V2: &str = r##"{
         "asyncapi": "2.6.0",
@@ -287,14 +241,6 @@ mod tests {
         "channels": {"placed": {"address": "orders/placed"}},
         "operations": {"onPlaced": {"action": "receive", "channel": {"$ref": "#/channels/placed"}}}
     }"##;
-
-    fn stream(text: &str, media_type: Option<&str>) -> Stream {
-        Stream::new(
-            StreamId::new(1),
-            text.as_bytes().to_vec(),
-            media_type.map(str::to_string),
-        )
-    }
 
     #[test]
     fn a_sound_description_holds_bare_and_bound_in_both_versions() {
