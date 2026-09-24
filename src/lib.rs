@@ -20,9 +20,11 @@
 //! next layer here; the message schemas inside are
 //! `xmip-core-contract-json-schema`'s.
 
-use contract::{
+use contract::reference;
+
+use sdk::contract::{
     Contract, ContractDescriptor, ContractError, ContractFactory, ContractId, ValidationIssue,
-    ValidationResult, reference,
+    ValidationResult,
 };
 use serde_json::Value;
 use stream::Stream;
