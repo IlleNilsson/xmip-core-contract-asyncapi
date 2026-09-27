@@ -20,6 +20,7 @@
 //! next layer here; the message schemas inside are
 //! `xmip-core-contract-json-schema`'s.
 
+use contract::place::Place;
 use contract::reference;
 use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
 
@@ -89,7 +90,7 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
         issues.push(ValidationIssue::new(
             "structure",
             "neither asyncapi 2.x nor 3.x is declared",
-            Some("asyncapi".into()),
+            Some("/asyncapi".into()),
         ));
     }
     for field in ["title", "version"] {
@@ -101,8 +102,8 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
         {
             issues.push(ValidationIssue::new(
                 "structure",
-                &format!("info.{field} is missing"),
-                Some("info".into()),
+                format!("info.{field} is missing"),
+                Some("/info".into()),
             ));
         }
     }
@@ -112,12 +113,12 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
         Some(_) => issues.push(ValidationIssue::new(
             "structure",
             "channels is not an object",
-            Some("channels".into()),
+            Some("/channels".into()),
         )),
         None => issues.push(ValidationIssue::new(
             "structure",
             "channels is missing",
-            Some("channels".into()),
+            Some("/channels".into()),
         )),
     }
     if version.starts_with("3.")
@@ -135,7 +136,7 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
                         issues.push(ValidationIssue::new(
                             "structure",
                             "an operation without a channel $ref",
-                            Some(format!("operations.{name}")),
+                            Some(Place::Root.field("operations").field(name).pointer()),
                         ));
                     }
                 }
@@ -143,7 +144,7 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
             None => issues.push(ValidationIssue::new(
                 "structure",
                 "operations is not an object",
-                Some("operations".into()),
+                Some("/operations".into()),
             )),
         }
     }
@@ -177,7 +178,7 @@ impl Contract for AsyncApi {
         }) {
             return Ok(true);
         }
-        let Ok(text) = std::str::from_utf8(stream.bytes()) else {
+        let Ok(text) = stream.text() else {
             return Ok(false);
         };
         Ok(text.contains("\"asyncapi\""))
@@ -188,7 +189,7 @@ impl Contract for AsyncApi {
             Ok(document) => document,
             Err(error) => {
                 return Ok(ValidationResult::of(vec![ValidationIssue::malformed(
-                    &format!("not JSON: {error}"),
+                    format!("not JSON: {error}"),
                 )]));
             }
         };
@@ -198,8 +199,8 @@ impl Contract for AsyncApi {
         {
             issues.push(ValidationIssue::new(
                 "channel",
-                &format!("does not define channel {channel}"),
-                Some("channels".into()),
+                format!("does not define channel {channel}"),
+                Some("/channels".into()),
             ));
         }
         Ok(ValidationResult::of(issues))
@@ -322,7 +323,7 @@ mod tests {
         );
         assert_eq!(
             result.issues[1].path.as_deref(),
-            Some("channels.orders/placed.subscribe.message")
+            Some("/channels/orders~1placed/subscribe/message")
         );
         let no_channel = V3.replace(r##""channel": {"$ref": "#/channels/placed"}"##, "\"x\": 1");
         let result = AsyncApi::new()
@@ -334,7 +335,7 @@ mod tests {
         );
         assert_eq!(
             result.issues[0].path.as_deref(),
-            Some("operations.onPlaced")
+            Some("/operations/onPlaced")
         );
         let result = AsyncApi::of("orders/cancelled")
             .validate(&stream(V2, None))
