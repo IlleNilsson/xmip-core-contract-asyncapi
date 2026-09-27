@@ -21,6 +21,7 @@
 //! `xmip-core-contract-json-schema`'s.
 
 use contract::reference;
+use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
 
 use contract::{
     Contract, ContractDescriptor, ContractError, ContractFactory, ContractId, ValidationIssue,
@@ -214,6 +215,10 @@ impl ContractFactory for AsyncApiFactory {
         "asyncapi"
     }
 
+    fn settings(&self) -> &'static Settings {
+        SETTINGS
+    }
+
     fn load(&self, reference: &str) -> Result<Box<dyn Contract>, ContractError> {
         let reference = reference.trim();
         if reference.is_empty() {
@@ -222,6 +227,18 @@ impl ContractFactory for AsyncApiFactory {
         Ok(Box::new(AsyncApi::of(reference)))
     }
 }
+
+/// What a Location gives this contract (ADR-0064, amendment 2026-09-26).
+const SETTINGS: &Settings = &Settings {
+    technology: env!("CARGO_PKG_NAME"),
+    settings: &[Setting {
+        name: "reference",
+        kind: Kind::Text,
+        presence: Presence::Optional,
+        meaning: "The channel the description must define; left out, any sound one holds.",
+        applies: Applies::Both,
+    }],
+};
 
 #[cfg(test)]
 mod tests {
@@ -353,5 +370,30 @@ mod tests {
             ))
             .expect("validate");
         assert_eq!(result.issues.len(), 3);
+    }
+
+    #[test]
+    fn asyncapi_declares_its_settings_and_reads_through_them() {
+        assert!(SETTINGS.problems().is_empty(), "{:?}", SETTINGS.problems());
+        let given = |name: &str, value: &str| {
+            (
+                name.to_string(),
+                xcore::settings::Given::Text(value.to_string()),
+            )
+        };
+        assert!(AsyncApiFactory.open(Applies::Both, &[]).is_ok(), "bare");
+        let bound = AsyncApiFactory
+            .open(Applies::Receive, &[given("reference", "orders/placed")])
+            .expect("bound");
+        assert!(bound.descriptor().id.0.contains("asyncapi:orders/placed"));
+        let refused = AsyncApiFactory
+            .open(Applies::Send, &[given("unheard_of", "x")])
+            .err()
+            .expect("an unknown setting is refused");
+        assert!(
+            refused.message.contains("unheard_of"),
+            "{}",
+            refused.message
+        );
     }
 }
