@@ -178,14 +178,14 @@ impl Contract for AsyncApi {
         }) {
             return Ok(true);
         }
-        let Ok(text) = stream.text() else {
+        let Ok(text) = contract::text(stream)? else {
             return Ok(false);
         };
         Ok(text.contains("\"asyncapi\""))
     }
 
     fn validate(&self, stream: &Stream) -> Result<ValidationResult, ContractError> {
-        let document: Value = match serde_json::from_slice(stream.bytes()) {
+        let document: Value = match serde_json::from_slice(stream.load()?) {
             Ok(document) => document,
             Err(error) => {
                 return Ok(ValidationResult::of(vec![ValidationIssue::malformed(
