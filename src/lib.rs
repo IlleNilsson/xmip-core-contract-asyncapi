@@ -19,24 +19,41 @@
 //! description in YAML is the same document in another notation and is the
 //! next layer here; the message schemas inside are
 //! `xmip-core-contract-json-schema`'s.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location naming it is configured with and the
+//! name a Validate step names it by, and none of the code above, which is
+//! behind the default feature: what the surfaces' library carries (ADR-0064,
+//! amendment 2026-11-26).
 
+#[cfg(feature = "declaration")]
+pub mod declaration;
+
+#[cfg(feature = "default")]
 use contract::place::Place;
+#[cfg(feature = "default")]
 use contract::reference;
-use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
+#[cfg(feature = "default")]
+use xcore::settings::Settings;
 
+#[cfg(feature = "default")]
 use contract::{
     Contract, ContractDescriptor, ContractError, ContractFactory, ContractId, ValidationIssue,
     ValidationResult,
 };
+#[cfg(feature = "default")]
 use serde_json::Value;
+#[cfg(feature = "default")]
 use stream::Stream;
 
 /// The `AsyncAPI` contract, bare or bound to a channel.
+#[cfg(feature = "default")]
 pub struct AsyncApi {
     descriptor: ContractDescriptor,
     channel: Option<String>,
 }
 
+#[cfg(feature = "default")]
 impl AsyncApi {
     /// A sound description, of any channels.
     #[must_use]
@@ -63,12 +80,14 @@ impl AsyncApi {
     }
 }
 
+#[cfg(feature = "default")]
 impl Default for AsyncApi {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(feature = "default")]
 fn descriptor(id: &str) -> ContractDescriptor {
     ContractDescriptor {
         id: ContractId(id.to_string()),
@@ -78,6 +97,7 @@ fn descriptor(id: &str) -> ContractDescriptor {
 }
 
 /// Every departure of `document` from a sound description.
+#[cfg(feature = "default")]
 fn soundness(document: &Value) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     let Some(object) = document.as_object() else {
@@ -153,6 +173,7 @@ fn soundness(document: &Value) -> Vec<ValidationIssue> {
 }
 
 /// Whether `document` defines `channel`, by key or by 3.x address.
+#[cfg(feature = "default")]
 fn defines(document: &Value, channel: &str) -> bool {
     document
         .get("channels")
@@ -165,6 +186,7 @@ fn defines(document: &Value, channel: &str) -> bool {
         })
 }
 
+#[cfg(feature = "default")]
 impl Contract for AsyncApi {
     fn descriptor(&self) -> &ContractDescriptor {
         &self.descriptor
@@ -209,15 +231,17 @@ impl Contract for AsyncApi {
 
 /// Loads the contract a Location names: an empty reference is the bare
 /// contract, anything else a channel, `orders/placed`.
+#[cfg(feature = "default")]
 pub struct AsyncApiFactory;
 
+#[cfg(feature = "default")]
 impl ContractFactory for AsyncApiFactory {
     fn technology(&self) -> &'static str {
-        "asyncapi"
+        declaration::NAME
     }
 
     fn settings(&self) -> &'static Settings {
-        SETTINGS
+        declaration::SETTINGS
     }
 
     fn load(&self, reference: &str) -> Result<Box<dyn Contract>, ContractError> {
@@ -228,18 +252,6 @@ impl ContractFactory for AsyncApiFactory {
         Ok(Box::new(AsyncApi::of(reference)))
     }
 }
-
-/// What a Location gives this contract (ADR-0064, amendment 2026-09-26).
-const SETTINGS: &Settings = &Settings {
-    technology: env!("CARGO_PKG_NAME"),
-    settings: &[Setting {
-        name: "reference",
-        kind: Kind::Text,
-        presence: Presence::Optional,
-        meaning: "The channel the description must define; left out, any sound one holds.",
-        applies: Applies::Both,
-    }],
-};
 
 #[cfg(test)]
 mod tests {
@@ -375,6 +387,8 @@ mod tests {
 
     #[test]
     fn asyncapi_declares_its_settings_and_reads_through_them() {
+        use declaration::SETTINGS;
+        use xcore::settings::Applies;
         assert!(SETTINGS.problems().is_empty(), "{:?}", SETTINGS.problems());
         let given = |name: &str, value: &str| {
             (
